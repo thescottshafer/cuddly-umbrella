@@ -158,6 +158,8 @@ export default function App() {
   const [rateCard, setRateCard] = useState(RATE_CARD);
   const [tab, setTab] = useState("projects");
   const [open, setOpen] = useState(new Set());
+  const [projView, setProjView] = useState("all");      // "all" | "customer"
+  const [expandedCusts, setExpandedCusts] = useState(new Set()); // open customer groups
   const [search, setSearch] = useState("");
   const [fCust, setFCust] = useState(""); const [fProg, setFProg] = useState("");
   const [fRes, setFRes] = useState(""); const [fStat, setFStat] = useState("");
@@ -327,11 +329,137 @@ export default function App() {
         <ExportBar tab={tab} projects={tab==="projects"||tab==="rdb"?filtered:projects} roster={roster}/>
 
         {tab==="projects"&&(
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div>
+            {/* View toggle */}
+            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:14}}>
+              {[["all","View All"],["customer","By Customer"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setProjView(v)}
+                  style={{padding:"5px 14px",fontSize:12,border:"1px solid",borderRadius:6,cursor:"pointer",fontWeight:500,
+                    borderColor:projView===v?"#185FA5":"#ccc9c0",
+                    background:projView===v?"#E6F1FB":"#fff",
+                    color:projView===v?"#185FA5":"#555"}}>
+                  {l}
+                </button>
+              ))}
+              {projView==="customer"&&(
+                <div style={{marginLeft:6,display:"flex",gap:6}}>
+                  <button onClick={()=>setExpandedCusts(new Set(filtered.map(p=>p.customer)))}
+                    style={{padding:"4px 10px",fontSize:11,border:"1px solid #ccc9c0",borderRadius:5,background:"#fff",cursor:"pointer",color:"#555"}}>
+                    Expand all
+                  </button>
+                  <button onClick={()=>setExpandedCusts(new Set())}
+                    style={{padding:"4px 10px",fontSize:11,border:"1px solid #ccc9c0",borderRadius:5,background:"#fff",cursor:"pointer",color:"#555"}}>
+                    Collapse all
+                  </button>
+                </div>
+              )}
+            </div>
+
             {filtered.length===0&&<div style={{textAlign:"center",padding:"3rem",color:"#aaa89e"}}>No projects match your filters.</div>}
-            {filtered.map(p=><ProjCard key={p.id} p={p} isOpen={open.has(p.id)}
-              onToggle={()=>setOpen(prev=>{const s=new Set(prev);s.has(p.id)?s.delete(p.id):s.add(p.id);return s;})}
-              updProj={updProj} updTask={updTask} roster={roster} deleteProj={deleteProj}/>)}
+
+            {/* Flat view */}
+            {projView==="all"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {filtered.map(p=><ProjCard key={p.id} p={p} isOpen={open.has(p.id)}
+                  onToggle={()=>setOpen(prev=>{const s=new Set(prev);s.has(p.id)?s.delete(p.id):s.add(p.id);return s;})}
+                  updProj={updProj} updTask={updTask} roster={roster} deleteProj={deleteProj}/>)}
+              </div>
+            )}
+
+            {/* Customer-grouped view */}
+            {projView==="customer"&&(()=>{
+              // Build customer -> program -> milestones hierarchy
+              const custMap = {};
+              filtered.forEach(p=>{
+                if (!custMap[p.customer]) custMap[p.customer]={};
+                if (!custMap[p.customer][p.program]) custMap[p.customer][p.program]=[];
+                custMap[p.customer][p.program].push(p);
+              });
+              return (
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {Object.entries(custMap).sort(([a],[b])=>a.localeCompare(b)).map(([cust,programs])=>{
+                    const isOpen = expandedCusts.has(cust);
+                    const allMilestones = Object.values(programs).flat();
+                    const totalTasks = allMilestones.reduce((s,p)=>s+p.tasks.length,0);
+                    const doneTasks = allMilestones.reduce((s,p)=>s+p.tasks.filter(t=>t.status==="Complete").length,0);
+                    const totalRev = allMilestones.reduce((s,p)=>s+p.milestoneRate*(p.finalUnits??p.uForecast??0),0);
+                    const progNames = Object.keys(programs);
+                    return (
+                      <div key={cust} style={{border:"0.5px solid #dddbd4",borderRadius:12,overflow:"hidden",background:"#fff"}}>
+                        {/* Customer header -- click to expand/collapse */}
+                        <div onClick={()=>setExpandedCusts(prev=>{const s=new Set(prev);s.has(cust)?s.delete(cust):s.add(cust);return s;})}
+                          style={{display:"flex",alignItems:"center",gap:12,padding:"14px 18px",
+                            background:isOpen?"#1a1a18":"#f8f7f4",cursor:"pointer",userSelect:"none",
+                            borderBottom:isOpen?"0.5px solid #dddbd4":"none"}}>
+                          {/* Chevron */}
+                          <span style={{fontSize:12,color:isOpen?"#90c060":"#888780",
+                            transform:isOpen?"rotate(90deg)":"none",display:"inline-block",transition:"transform 0.15s",flexShrink:0}}>
+                            {">"}
+                          </span>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:15,fontWeight:600,color:isOpen?"#f8f7f4":"#1a1a18"}}>{cust}</div>
+                            <div style={{fontSize:11,color:isOpen?"#aaa89e":"#888780",marginTop:2}}>
+                              {progNames.length} program{progNames.length!==1?"s":""} * {allMilestones.length} milestone{allMilestones.length!==1?"s":""}
+                            </div>
+                          </div>
+                          {/* Summary stats */}
+                          <div style={{display:"flex",gap:20,alignItems:"center"}}>
+                            <div style={{textAlign:"right"}}>
+                              <div style={{fontSize:10,color:isOpen?"#888780":"#aaa89e",textTransform:"uppercase",letterSpacing:"0.05em"}}>Forecast Rev</div>
+                              <div style={{fontSize:14,fontWeight:600,color:isOpen?"#90c060":"#1a1a18"}}>${Math.round(totalRev).toLocaleString()}</div>
+                            </div>
+                            <div style={{textAlign:"right"}}>
+                              <div style={{fontSize:10,color:isOpen?"#888780":"#aaa89e",textTransform:"uppercase",letterSpacing:"0.05em"}}>Tasks Done</div>
+                              <div style={{fontSize:14,fontWeight:600,color:isOpen?"#f8f7f4":"#1a1a18"}}>{doneTasks}/{totalTasks}</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Expanded: programs with their milestone cards */}
+                        {isOpen&&(
+                          <div style={{padding:"10px 14px",display:"flex",flexDirection:"column",gap:14}}>
+                            {Object.entries(programs).sort(([a],[b])=>a.localeCompare(b)).map(([prog,milestones])=>{
+                              const progRev = milestones.reduce((s,p)=>s+p.milestoneRate*(p.finalUnits??p.uForecast??0),0);
+                              const progDone = milestones.reduce((s,p)=>s+p.tasks.filter(t=>t.status==="Complete").length,0);
+                              const progTotal = milestones.reduce((s,p)=>s+p.tasks.length,0);
+                              const progPct = progTotal>0?Math.round(progDone/progTotal*100):0;
+                              return (
+                                <div key={prog}>
+                                  {/* Program sub-header */}
+                                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",
+                                    background:"#f0ede8",borderRadius:8,marginBottom:8}}>
+                                    <div style={{flex:1}}>
+                                      <div style={{fontSize:13,fontWeight:600,color:"#1a1a18"}}>{prog}</div>
+                                      <div style={{fontSize:11,color:"#888780"}}>{milestones.length} milestone{milestones.length!==1?"s":""}</div>
+                                    </div>
+                                    <div style={{textAlign:"right",marginRight:8}}>
+                                      <div style={{fontSize:11,color:"#888780"}}>${Math.round(progRev).toLocaleString()} forecast</div>
+                                      <div style={{fontSize:11,color:"#888780"}}>{progDone}/{progTotal} tasks * {progPct}% done</div>
+                                    </div>
+                                    {/* Mini progress bar */}
+                                    <div style={{width:60,height:6,background:"#dddbd4",borderRadius:3,flexShrink:0}}>
+                                      <div style={{width:progPct+"%",height:"100%",background:progPct===100?"#63991f":"#185FA5",borderRadius:3}}/>
+                                    </div>
+                                  </div>
+                                  {/* Milestone cards */}
+                                  <div style={{display:"flex",flexDirection:"column",gap:8,paddingLeft:4}}>
+                                    {milestones.map(p=>(
+                                      <ProjCard key={p.id} p={p} isOpen={open.has(p.id)}
+                                        onToggle={()=>setOpen(prev=>{const s=new Set(prev);s.has(p.id)?s.delete(p.id):s.add(p.id);return s;})}
+                                        updProj={updProj} updTask={updTask} roster={roster} deleteProj={deleteProj}/>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
         {tab==="resources"&&<ResView projects={filtered} roster={roster} updTask={updTask}/>}
